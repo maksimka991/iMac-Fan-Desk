@@ -50,11 +50,29 @@ static class DeskFiles {
     public static readonly string Root=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"iMacFanDesk");
     public static string Sensor="HOT";
     public static bool Maximum;
+    public static bool OverlayVisible;
+    public static int OverlayX=int.MinValue, OverlayY=int.MinValue;
     public static CurveSettings Curve=new CurveSettings();
     public static void SaveCurve(CurveSettings c){string path=Path.Combine(Root,"curve.txt"),tmp=path+".tmp";File.WriteAllText(tmp,c.Serialize());if(File.Exists(path))File.Replace(tmp,path,null);else File.Move(tmp,path);Curve=c;}
+    public static void SaveOverlay(bool visible,int x,int y) {
+        OverlayVisible=visible;OverlayX=x;OverlayY=y;
+        try {
+            string path=Path.Combine(Root,"overlay.txt"),tmp=path+".tmp";
+            File.WriteAllText(tmp,(visible?"1":"0")+","+x+","+y);
+            if(File.Exists(path))File.Replace(tmp,path,null);else File.Move(tmp,path);
+        } catch(Exception ex){Error(ex);}
+    }
     public static void Load() {
         Directory.CreateDirectory(Root);Directory.CreateDirectory(Path.Combine(Root,"logs"));
         try{string cp=Path.Combine(Root,"curve.txt");if(File.Exists(cp))Curve=CurveSettings.Parse(File.ReadAllText(cp));}catch(Exception ex){Error(ex);Curve=new CurveSettings();}
+        try{
+            string op=Path.Combine(Root,"overlay.txt");
+            if(File.Exists(op)){
+                var parts=File.ReadAllText(op).Trim().Split(',');
+                if(parts.Length>=1)OverlayVisible=parts[0]=="1";
+                if(parts.Length>=3){int.TryParse(parts[1],out OverlayX);int.TryParse(parts[2],out OverlayY);}
+            }
+        }catch(Exception ex){Error(ex);}
         string path=Path.Combine(Root,"sensor.txt");
         if(File.Exists(path)) {string key=File.ReadAllText(path).Trim();if(key=="HOT"||key=="ALL"||(key.Length==4&&key.StartsWith("T"))) Sensor=key;}
         string mode=Path.Combine(Root,"mode.txt");Maximum=File.Exists(mode)&&File.ReadAllText(mode).Trim()=="max";

@@ -1,4 +1,4 @@
-// iMac Fan Desk 0.5 - GPL-2.0-only. SMC module: RPMac v1.10.1.
+// iMac Fan Desk 0.6 - GPL-2.0-only. SMC module: RPMac v1.10.1.
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -13,12 +13,72 @@ using System.Windows.Forms;
 using Microsoft.Win32;
 using RPMac;
 
+class MiniOverlay : Form {
+    readonly Label tempLabel=new Label(), rpmLabel=new Label();
+    bool dragging; Point dragStart;
+    public Action<Point> PositionChanged;
+    public MiniOverlay() {
+        FormBorderStyle=FormBorderStyle.None;
+        ShowInTaskbar=false;
+        TopMost=true;
+        StartPosition=FormStartPosition.Manual;
+        Size=new Size(184,42);
+        BackColor=Color.FromArgb(18,26,38);
+        ForeColor=FanDeskV2.Ink;
+        Opacity=0.90;
+        DoubleBuffered=true;
+        var row=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=2,RowCount=1,Padding=new Padding(6,4,6,4),BackColor=Color.Transparent};
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,46));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,54));
+        tempLabel.Text="— °C";
+        tempLabel.Font=new Font("Segoe UI",13,FontStyle.Bold);
+        tempLabel.ForeColor=Color.FromArgb(244,143,145);
+        tempLabel.Dock=DockStyle.Fill;
+        tempLabel.TextAlign=ContentAlignment.MiddleCenter;
+        rpmLabel.Text="— RPM";
+        rpmLabel.Font=new Font("Segoe UI",13,FontStyle.Bold);
+        rpmLabel.ForeColor=Color.FromArgb(72,186,255);
+        rpmLabel.Dock=DockStyle.Fill;
+        rpmLabel.TextAlign=ContentAlignment.MiddleCenter;
+        row.Controls.Add(tempLabel,0,0);
+        row.Controls.Add(rpmLabel,1,0);
+        Controls.Add(row);
+        foreach(Control c in new Control[]{this,row,tempLabel,rpmLabel}) {
+            c.MouseDown+=OnDown;
+            c.MouseMove+=OnMove;
+            c.MouseUp+=OnUp;
+            c.Cursor=Cursors.SizeAll;
+        }
+        Paint+=delegate(object s,PaintEventArgs e) {
+            using(var pen=new Pen(Color.FromArgb(56,78,108),1))
+                e.Graphics.DrawRectangle(pen,0,0,Width-1,Height-1);
+        };
+    }
+    protected override bool ShowWithoutActivation { get { return true; } }
+    void OnDown(object s,MouseEventArgs e) { if(e.Button==MouseButtons.Left){dragging=true;dragStart=e.Location;} }
+    void OnMove(object s,MouseEventArgs e) {
+        if(!dragging)return;
+        Location=new Point(Location.X+e.X-dragStart.X,Location.Y+e.Y-dragStart.Y);
+    }
+    void OnUp(object s,MouseEventArgs e) {
+        if(!dragging)return;
+        dragging=false;
+        if(PositionChanged!=null)PositionChanged(Location);
+    }
+    public void UpdateValues(double temp,double rpm) {
+        tempLabel.Text=DeskPolicy.TemperatureValid(temp)?temp.ToString("0")+"°C":"—";
+        tempLabel.ForeColor=DeskPolicy.TemperatureValid(temp)&&temp>=80?Color.FromArgb(255,120,105):Color.FromArgb(244,143,145);
+        rpmLabel.Text=DeskPolicy.Valid(rpm)?rpm.ToString("0")+" RPM":"—";
+    }
+}
+
 class FanDeskV2 : Form {
-    const string Version="0.5";
-    readonly Button maxButton=new Button(),curveButton=new Button(),applyCurveButton=new Button(),resetCurveButton=new Button();
+    const string Version="0.6";
+    readonly Button maxButton=new Button(),curveButton=new Button(),overlayButton=new Button(),applyCurveButton=new Button(),resetCurveButton=new Button();
     readonly NumericUpDown[] tempInputs=new NumericUpDown[4], rpmInputs=new NumericUpDown[4];
     readonly CheckBox extendedCheck=new CheckBox();
-    bool maximum=DeskFiles.Maximum;
+    bool maximum=DeskFiles.Maximum, overlayOn=DeskFiles.OverlayVisible;
+    MiniOverlay overlay; ToolStripMenuItem trayOverlayItem;
     readonly Label tempCard=new Label(), rpmCard=new Label(), targetCard=new Label(), status=new Label(), curveLabel=new Label();
     readonly ComboBox sensorBox=new ComboBox();
     readonly HistoryChart history=new HistoryChart();readonly CurveChart curve=new CurveChart();
@@ -26,7 +86,7 @@ class FanDeskV2 : Form {
     NotifyIcon tray;Icon currentIcon; RegisteredWaitHandle showRegistration;
     bool busy,exiting,initialized,populating,preview,startInTray;int mismatches;
     string selectedKey=DeskFiles.Sensor,logPath;List<SensorChoice> knownSensors=new List<SensorChoice>();
-    double lastSent=Double.NaN,cachedMax=Double.NaN;int fanIndex;
+    double lastSent=Double.NaN,cachedMax=Double.NaN,lastTemp=Double.NaN,lastRpm=Double.NaN;int fanIndex;
     public static readonly Color Bg=Color.FromArgb(15,22,32),PanelColor=Color.FromArgb(23,31,43),Ink=Color.FromArgb(230,237,246),Muted=Color.FromArgb(153,172,194);
     [DllImport("user32.dll")]static extern bool DestroyIcon(IntPtr handle);
     public FanDeskV2(bool hidden,bool designPreview) {
@@ -53,11 +113,13 @@ class FanDeskV2 : Form {
         var sensorRow=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=2,Margin=Padding.Empty};sensorRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,165));sensorRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
         sensorRow.Controls.Add(new Label{Text="Керувати за датчиком",Dock=DockStyle.Fill,TextAlign=ContentAlignment.MiddleLeft});
         sensorBox.Dock=DockStyle.Fill;sensorBox.DropDownStyle=ComboBoxStyle.DropDownList;sensorBox.Margin=new Padding(0,12,0,10);sensorRow.Controls.Add(sensorBox);root.Controls.Add(sensorRow);
-        var modes=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=3,Margin=Padding.Empty};
-        modes.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,155));modes.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,175));modes.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
+        var modes=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=4,Margin=Padding.Empty};
+        modes.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,145));modes.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,145));modes.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,175));modes.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
         maxButton.Text="МАКСИМУМ";curveButton.Text="За кривою";
-        foreach(var button in new[]{maxButton,curveButton}){button.Dock=DockStyle.Fill;button.FlatStyle=FlatStyle.Flat;button.ForeColor=Ink;button.Margin=new Padding(0,6,10,8);modes.Controls.Add(button);}
+        foreach(var button in new[]{maxButton,curveButton,overlayButton}){button.Dock=DockStyle.Fill;button.FlatStyle=FlatStyle.Flat;button.ForeColor=Ink;button.Margin=new Padding(0,6,10,8);modes.Controls.Add(button);}
         maxButton.Click+=delegate{SetMode(true);};curveButton.Click+=delegate{SetMode(false);};
+        overlayButton.Click+=delegate{SetOverlay(!overlayOn);};
+        UpdateOverlayButtonStyle();
         curveLabel.Text="Крива керування";curveLabel.Dock=DockStyle.Fill;curveLabel.ForeColor=Muted;curveLabel.TextAlign=ContentAlignment.MiddleLeft;modes.Controls.Add(curveLabel);root.Controls.Add(modes);
         root.Controls.Add(BuildCurveEditor());
         status.Text="Підключення до SMC…";status.Dock=DockStyle.Fill;status.ForeColor=Muted;root.Controls.Add(status);
@@ -68,15 +130,44 @@ class FanDeskV2 : Form {
             catch(Exception ex){DeskFiles.Error(ex);status.Text="Не вдалося зберегти датчик: "+ex.Message;}
         };
         if(!preview) {
-            SetupTray();string logs=Path.Combine(DeskFiles.Root,"logs");
+            SetupTray();
+            InitOverlay();
+            string logs=Path.Combine(DeskFiles.Root,"logs");
             logPath=Path.Combine(logs,"fans-"+DateTime.Now.ToString("yyyyMMdd-HHmmss")+".csv");
             File.WriteAllText(logPath,"time,sensor,temp_c,actual_rpm,target_rpm,max_rpm,cpu_c,gpu_c,forced,fallback,selection,mode\r\n");
             timer.Interval=2000;timer.Tick+=async delegate {await Poll();};
             SystemEvents.PowerModeChanged+=PowerChanged;
-            Shown+=async delegate {if(startInTray)Hide();await Poll();timer.Start();};
+            Shown+=async delegate {if(startInTray)Hide();if(overlayOn&&overlay!=null)overlay.Show();await Poll();timer.Start();};
             Resize+=delegate{if(WindowState==FormWindowState.Minimized)Hide();};
         }
         FormClosing+=ClosingWindow;
+    }
+    void InitOverlay() {
+        overlay=new MiniOverlay();
+        var screen=Screen.PrimaryScreen.WorkingArea;
+        int x=DeskFiles.OverlayX, y=DeskFiles.OverlayY;
+        if(x==int.MinValue||y==int.MinValue||x<screen.Left-100||y<screen.Top-20||x>screen.Right-40||y>screen.Bottom-20) {
+            x=screen.Right-overlay.Width-24;
+            y=screen.Top+24;
+        }
+        overlay.Location=new Point(x,y);
+        overlay.PositionChanged=loc=>DeskFiles.SaveOverlay(overlayOn,loc.X,loc.Y);
+    }
+    void SetOverlay(bool on) {
+        overlayOn=on;
+        Point loc=overlay!=null?overlay.Location:new Point(DeskFiles.OverlayX,DeskFiles.OverlayY);
+        DeskFiles.SaveOverlay(overlayOn,loc.X,loc.Y);
+        UpdateOverlayButtonStyle();
+        if(overlay!=null) {
+            overlay.UpdateValues(lastTemp,lastRpm);
+            if(overlayOn) { if(!overlay.Visible) overlay.Show(); overlay.TopMost=true; }
+            else overlay.Hide();
+        }
+    }
+    void UpdateOverlayButtonStyle() {
+        overlayButton.Text=overlayOn?"Міні-вікно: ВКЛ":"Міні-вікно: ВИКЛ";
+        overlayButton.BackColor=overlayOn?Color.FromArgb(42,108,82):PanelColor;
+        if(trayOverlayItem!=null) trayOverlayItem.Text=overlayOn?"Міні-вікно поверх усіх: ВКЛ":"Міні-вікно поверх усіх: ВИКЛ";
     }
     Control BuildCurveEditor() {
         var panel=new TableLayoutPanel{Dock=DockStyle.Fill,BackColor=PanelColor,ColumnCount=1,RowCount=2,Padding=new Padding(12,6,12,6),Margin=new Padding(0,0,0,8)};
@@ -145,6 +236,8 @@ class FanDeskV2 : Form {
     }
     void SetupTray() {
         var menu=new ContextMenuStrip();menu.Items.Add("Відкрити",null,delegate{ShowDesk();});
+        trayOverlayItem=new ToolStripMenuItem(overlayOn?"Міні-вікно поверх усіх: ВКЛ":"Міні-вікно поверх усіх: ВИКЛ",null,delegate{SetOverlay(!overlayOn);});
+        menu.Items.Add(trayOverlayItem);
         menu.Items.Add("МАКСИМУМ",null,delegate{SetMode(true);});menu.Items.Add("За кривою",null,delegate{SetMode(false);});
         menu.Items.Add("Журнали",null,delegate{Process.Start(Path.Combine(DeskFiles.Root,"logs"));});
         menu.Items.Add(new ToolStripSeparator());menu.Items.Add("Вийти → системне Auto",null,async delegate{await ExitDesk();});
@@ -183,7 +276,6 @@ class FanDeskV2 : Form {
                     var temperatures=new Dictionary<string,double>{{"TCXc",cpu},{"TG0D",gpu}};
                     if(key=="ALL")foreach(var sensor in knownSensors)if(sensor.Key.StartsWith("T")&&!temperatures.ContainsKey(sensor.Key))temperatures[sensor.Key]=Smc.ReadTemp(sensor.Key);
                     var hottest=DeskPolicy.Hottest(temperatures);temp=hottest.Value;actualKey=hottest.Key;
-                    // A missing primary CPU/GPU reading must not silently select a cooler component.
                     if(!DeskPolicy.TemperatureValid(cpu)||!DeskPolicy.TemperatureValid(gpu))temp=Double.NaN;
                 } else temp=key=="TCXc"?cpu:key=="TG0D"?gpu:Smc.ReadTemp(key);
                 double target=activeCurve.Target(temp,f.Min,f.Max,useMaximum);cachedMax=activeCurve.EffectiveCeiling(f.Max);
@@ -198,6 +290,7 @@ class FanDeskV2 : Form {
             try{File.AppendAllText(logPath,String.Join(",",new[]{value.Time.ToString("o"),value.Sensor,DeskPolicy.Number(value.Temperature),DeskPolicy.Number(value.Fan.Actual),DeskPolicy.Number(value.Fan.Target),DeskPolicy.Number(value.Fan.Max),DeskPolicy.Number(value.Cpu),DeskPolicy.Number(value.Gpu),value.Fan.Forced?"1":"0",value.Fallback?"1":"0",value.Selection,value.Maximum?"max":"curve"})+"\r\n");}catch(Exception ex){DeskFiles.Error(ex);status.Text+=" · Журнал недоступний";}
         } catch(Exception ex){
             DeskFiles.Error(ex);status.ForeColor=Color.Orange;status.Text="Немає надійних даних SMC. "+ex.Message;tempCard.Text="—";rpmCard.Text="—";targetCard.Text="—";SetTray(Double.NaN,"Немає даних SMC");
+            if(overlay!=null)overlay.UpdateValues(Double.NaN,Double.NaN);
             if(DeskPolicy.Valid(cachedMax))try{Smc.SetFanCurveRpm(fanIndex,cachedMax,activeCurve.Extended);}catch(Exception failure){DeskFiles.Error(failure);}
             initialized=false;
         }finally{busy=false;}
@@ -209,17 +302,21 @@ class FanDeskV2 : Form {
             if(selected==null){selected=value.Sensors.FirstOrDefault(s=>s.Key=="TCXc")??value.Sensors[0];DeskFiles.SaveSensor(selected.Key);selectedKey=selected.Key;lastSent=Double.NaN;}
             sensorBox.SelectedItem=selected;populating=false;
         }
-        var f=value.Fan;tempCard.Text=DeskPolicy.TemperatureValid(value.Temperature)?value.Temperature.ToString("0.0")+" °C":"—";rpmCard.Text=f.Actual.ToString("0")+" RPM";targetCard.Text=f.Target.ToString("0")+" RPM";
+        var f=value.Fan;
+        lastTemp=value.Temperature;lastRpm=f.Actual;
+        if(overlay!=null)overlay.UpdateValues(lastTemp,lastRpm);
+        tempCard.Text=DeskPolicy.TemperatureValid(value.Temperature)?value.Temperature.ToString("0.0")+" °C":"—";rpmCard.Text=f.Actual.ToString("0")+" RPM";targetCard.Text=f.Target.ToString("0")+" RPM";
         curveLabel.Text=activeCurve.Summary(f.Max);
         if(value.Maximum)curveLabel.Text="ПОСТІЙНИЙ MAX · "+activeCurve.EffectiveCeiling(f.Max).ToString("0")+" RPM (температура не знижує ціль)";
         maxButton.BackColor=value.Maximum?Color.FromArgb(145,86,24):PanelColor;curveButton.BackColor=value.Maximum?PanelColor:Color.FromArgb(34,81,112);
+        UpdateOverlayButtonStyle();
         curve.Curve=activeCurve;curve.Temperature=value.Temperature;curve.Min=f.Min;curve.Max=f.Max;curve.Invalidate();
         history.Samples.Add(value);history.Samples.RemoveAll(s=>(value.Time-s.Time).TotalSeconds>360);history.Invalidate();
         mismatches=Math.Abs(f.Actual-f.Target)>Math.Max(250,f.Target*.15)?mismatches+1:0;
         status.ForeColor=value.Fallback||mismatches>=8?Color.Orange:Muted;
         status.Text=value.Fallback?"Датчик недоступний — задано Max до відновлення даних.":mismatches>=8?"Фактичні оберти не досягають цілі. Дивись графік і журнал.":"Керує "+value.Sensor+" · CPU "+FormatTemp(value.Cpu)+" · GPU "+FormatTemp(value.Gpu)+" · "+value.Time.ToString("HH:mm:ss")+" · × у трей";
         SetTray(value.Temperature,String.Format("{0} · {1} · {2:0} RPM",value.Maximum?"MAX":"Крива",value.Sensor,f.Actual));
-        try{File.WriteAllLines(Path.Combine(DeskFiles.Root,"state.txt"),new[]{"version="+Version,"time="+value.Time.ToString("o"),"pid="+Process.GetCurrentProcess().Id,"windowVisible="+Visible,"trayVisible="+(tray!=null&&tray.Visible),"selection="+value.Selection,"mode="+(value.Maximum?"max":"curve"),"extended="+activeCurve.Extended,"sensor="+value.Sensor,"temperature="+DeskPolicy.Number(value.Temperature),"actualRPM="+DeskPolicy.Number(f.Actual),"targetRPM="+DeskPolicy.Number(f.Target),"forced="+f.Forced,"fallback="+value.Fallback});}catch(Exception ex){DeskFiles.Error(ex);}
+        try{File.WriteAllLines(Path.Combine(DeskFiles.Root,"state.txt"),new[]{"version="+Version,"time="+value.Time.ToString("o"),"pid="+Process.GetCurrentProcess().Id,"windowVisible="+Visible,"trayVisible="+(tray!=null&&tray.Visible),"overlayVisible="+overlayOn,"selection="+value.Selection,"mode="+(value.Maximum?"max":"curve"),"extended="+activeCurve.Extended,"sensor="+value.Sensor,"temperature="+DeskPolicy.Number(value.Temperature),"actualRPM="+DeskPolicy.Number(f.Actual),"targetRPM="+DeskPolicy.Number(f.Target),"forced="+f.Forced,"fallback="+value.Fallback});}catch(Exception ex){DeskFiles.Error(ex);}
     }
     static string FormatTemp(double value){return DeskPolicy.TemperatureValid(value)?value.ToString("0")+"°C":"—";}
     void SetTray(double temp,string detail){
@@ -244,16 +341,16 @@ class FanDeskV2 : Form {
             Smc.Cleanup();DisposeTray();Close();
         }catch(Exception ex){DeskFiles.Error(ex);exiting=false;timer.Start();ShowDesk();MessageBox.Show("Не вдалося повернути системне Auto: "+ex.Message);}
     }
-    void DisposeTray(){SystemEvents.PowerModeChanged-=PowerChanged;if(showRegistration!=null)showRegistration.Unregister(null);if(tray!=null){tray.Visible=false;tray.Dispose();tray=null;}if(currentIcon!=null){currentIcon.Dispose();currentIcon=null;}}
+    void DisposeTray(){SystemEvents.PowerModeChanged-=PowerChanged;if(showRegistration!=null)showRegistration.Unregister(null);if(overlay!=null){overlay.Close();overlay.Dispose();overlay=null;}if(tray!=null){tray.Visible=false;tray.Dispose();tray=null;}if(currentIcon!=null){currentIcon.Dispose();currentIcon=null;}}
     public void SeedPreview(){
         sensorBox.Items.Add(new SensorChoice{Key="HOT",Name="Найгарячіший із CPU / GPU (рекомендовано)"});populating=true;sensorBox.SelectedIndex=0;populating=false;
         var c=DeskFiles.Curve;
         for(int i=0;i<180;i++){double temp=58+28*(0.5+0.5*Math.Sin(i/35.0));double tgt=c.Target(temp,1200,2700,false);history.Samples.Add(new Reading{Time=DateTime.Now.AddSeconds((i-179)*2),Temperature=temp,Fan=new FanInfo{Actual=tgt+35*Math.Sin(i/4.0),Target=tgt,Max=2700}});}
-        tempCard.Text="82.5 °C";rpmCard.Text="2945 RPM";targetCard.Text="2950 RPM";curve.Curve=c;curve.Temperature=82.5;status.Text="Попередній перегляд · 4-точкова крива (55→80→85→90°C)";
+        tempCard.Text="82.5 °C";rpmCard.Text="2945 RPM";targetCard.Text="2950 RPM";curve.Curve=c;curve.Temperature=82.5;status.Text="Попередній перегляд · 4-точкова крива (55→80→85→90°C) + міні-вікно";
     }
     [STAThread]static int Main(string[] args){
         DeskFiles.Load();Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
-        if(args.Contains("--self-test")){try{DeskPolicy.SelfTest();File.WriteAllText(Path.Combine(DeskFiles.Root,"self-test.txt"),"PASS v0.5: 4-point curve, extended target override, hot GPU vs cool CPU, hot CPU, invalid readings, missing-sensor fallback, invalid limits");return 0;}catch(Exception ex){DeskFiles.Error(ex);return 2;}}
+        if(args.Contains("--self-test")){try{DeskPolicy.SelfTest();File.WriteAllText(Path.Combine(DeskFiles.Root,"self-test.txt"),"PASS v0.6: 4-point curve, extended target override, overlay, hot GPU vs cool CPU, hot CPU, invalid readings, missing-sensor fallback, invalid limits");return 0;}catch(Exception ex){DeskFiles.Error(ex);return 2;}}
         if(args.Contains("--render-preview")){using(var form=new FanDeskV2(false,true)){form.SeedPreview();form.Show();Application.DoEvents();using(var bitmap=new Bitmap(form.Width,form.Height)){form.DrawToBitmap(bitmap,new Rectangle(0,0,form.Width,form.Height));bitmap.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"preview.png"),ImageFormat.Png);}form.Close();}return 0;}
         bool first;using(var single=new Mutex(true,"Local\\iMacFanDesk_controller",out first))using(var show=new EventWaitHandle(false,EventResetMode.AutoReset,"Local\\iMacFanDesk_show")){
             if(!first){show.Set();return 0;}Process.GetCurrentProcess().PriorityClass=ProcessPriorityClass.Normal;
