@@ -1,4 +1,4 @@
-﻿// RPMac - libreria del nucleo SMC (reutilizable por la GUI)
+// RPMac - libreria del nucleo SMC (reutilizable por la GUI)
 // Copyright (C) 2026 golirt1 - GPL-2.0-only
 // Derivado de applesmc.c (Boichat, Rydberg) / smcFanControl (Holtmann). Ver LICENSE y NOTICE.
 
@@ -649,6 +649,20 @@ namespace RPMac {
                 if (KeyInfo(p + "Tg", out tlen, out ttype)) WriteSmc(K(p + "Tg"), Encode(ttype, tlen, rpm), tlen);
             }
         }
+        // Explicit opt-in target override only. Never modify F0Mx, F0Mn or PWM.
+        public static void SetFanCurveRpm(int i,double rpm,bool extended) {
+            if(!WritesAllowed)throw new InvalidOperationException("SMC writes unavailable");
+            lock(gate) {
+                string p="F"+i;double mn=ReadNum(p+"Mn"),mx=ReadNum(p+"Mx");
+                if(double.IsNaN(mn)||double.IsNaN(mx)||double.IsNaN(rpm)||double.IsInfinity(rpm)||rpm<mn||rpm>(extended?3600:mx))throw new ArgumentException("Invalid RPM target");
+                if(useMmio)T2SetManual(i,true);else WriteMaskNoLock(ReadMaskNoLock()|(1L<<i));
+                int len;string type;
+                if(!KeyInfo(p+"Tg",out len,out type)||WriteSmc(K(p+"Tg"),Encode(type,len,rpm),len)!=0)throw new InvalidOperationException("SMC target write failed");
+                double readback=ReadNum(p+"Tg");
+                if(double.IsNaN(readback)||Math.Abs(readback-rpm)>40)throw new InvalidOperationException("SMC rejected requested RPM "+rpm+"; readback "+readback);
+            }
+        }
+
         public static void SetFanMax(int i) {
             if (!WritesAllowed) return;
             lock (gate) {
