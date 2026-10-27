@@ -1,0 +1,9 @@
+﻿install-backup-*/
+update-backup-*/
+logs/
+*.tmp
+latest-install-backup.txt
+probe.txt
+task-before-original-test.xml
+test-original-after-reboot.ps1
+test-original-after-reboot.txt
