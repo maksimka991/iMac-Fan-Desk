@@ -17,3 +17,7 @@ install-v*.ps1
 update-v*.ps1
 verify-*.ps1
 finalize-launch.ps1
+
+README-v02.md
+src/FanDesk-v1.backup.txt
+src/FanDesk.cs
