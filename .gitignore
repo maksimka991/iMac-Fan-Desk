@@ -1,9 +1,19 @@
-﻿install-backup-*/
+# Build outputs and local archives
+build/
+dist/
+archive/
+*.exe
+preview.png
+# Machine-specific diagnostics and deployment helpers
+install-backup-*/
 update-backup-*/
 logs/
 *.tmp
-latest-install-backup.txt
 probe.txt
+latest-install-backup.txt
 task-before-original-test.xml
-test-original-after-reboot.ps1
-test-original-after-reboot.txt
+test-original-after-reboot*
+install-v*.ps1
+update-v*.ps1
+verify-*.ps1
+finalize-launch.ps1

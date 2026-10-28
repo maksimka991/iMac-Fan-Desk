@@ -1,4 +1,4 @@
-// iMac Fan Desk 0.6 - GPL-2.0-only. SMC module: RPMac v1.10.1.
+﻿// iMac Fan Desk 0.6 - GPL-2.0-only. SMC module: RPMac v1.10.1.
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -73,10 +73,11 @@ class MiniOverlay : Form {
 }
 
 class FanDeskV2 : Form {
-    const string Version="0.6";
+    const string Version="0.7";
     readonly Button maxButton=new Button(),curveButton=new Button(),overlayButton=new Button(),applyCurveButton=new Button(),resetCurveButton=new Button();
     readonly NumericUpDown[] tempInputs=new NumericUpDown[4], rpmInputs=new NumericUpDown[4];
     readonly CheckBox extendedCheck=new CheckBox();
+    readonly Label editorState=new Label();
     bool maximum=DeskFiles.Maximum, overlayOn=DeskFiles.OverlayVisible;
     MiniOverlay overlay; ToolStripMenuItem trayOverlayItem;
     readonly Label tempCard=new Label(), rpmCard=new Label(), targetCard=new Label(), status=new Label(), curveLabel=new Label();
@@ -91,7 +92,7 @@ class FanDeskV2 : Form {
     [DllImport("user32.dll")]static extern bool DestroyIcon(IntPtr handle);
     public FanDeskV2(bool hidden,bool designPreview) {
         preview=designPreview;startInTray=hidden;
-        Text="iMac Fan Desk v"+Version;Size=new Size(1080,820);MinimumSize=new Size(960,760);StartPosition=FormStartPosition.CenterScreen;
+        Text="iMac Fan Desk v"+Version;Size=new Size(1120,870);MinimumSize=new Size(1040,820);StartPosition=FormStartPosition.CenterScreen;
         Font=new Font("Segoe UI",10);BackColor=Bg;ForeColor=Ink;AutoScaleMode=AutoScaleMode.Dpi;
         var root=new TableLayoutPanel{Dock=DockStyle.Fill,Padding=new Padding(24,20,24,18),ColumnCount=1,RowCount=7};
         root.RowStyles.Add(new RowStyle(SizeType.Absolute,52));
@@ -99,20 +100,20 @@ class FanDeskV2 : Form {
         root.RowStyles.Add(new RowStyle(SizeType.Percent,100));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute,56));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute,54));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute,86));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute,150));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute,42));
         Controls.Add(root);
         var title=new Label{Text="iMac Fan Desk v"+Version,Font=new Font("Segoe UI",22,FontStyle.Bold),Dock=DockStyle.Fill};root.Controls.Add(title);
         var cards=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=3,Margin=new Padding(0,0,0,12)};
         for(int i=0;i<3;i++)cards.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,33.33f));
-        MakeCard(cards,tempCard,"ДАТЧИК",Color.FromArgb(244,143,145));MakeCard(cards,rpmCard,"ФАКТИЧНІ ОБЕРТИ",Color.FromArgb(72,186,255));MakeCard(cards,targetCard,"ЦІЛЬ SMC",Color.FromArgb(246,198,90));root.Controls.Add(cards);
+        MakeCard(cards,tempCard,"ТЕМПЕРАТУРА КЕРУВАННЯ",Color.FromArgb(244,143,145));MakeCard(cards,rpmCard,"ФАКТИЧНІ ОБЕРТИ",Color.FromArgb(72,186,255));MakeCard(cards,targetCard,"ЗАДАНІ ОБЕРТИ",Color.FromArgb(246,198,90));root.Controls.Add(cards);
         var charts=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=2,Margin=new Padding(0,0,0,12)};
         charts.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,72));charts.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,28));
         history.Dock=DockStyle.Fill;history.Margin=new Padding(0,0,12,0);curve.Dock=DockStyle.Fill;curve.Margin=Padding.Empty;
         charts.Controls.Add(history);charts.Controls.Add(curve);root.Controls.Add(charts);
         var sensorRow=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=2,Margin=Padding.Empty};sensorRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,165));sensorRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
         sensorRow.Controls.Add(new Label{Text="Керувати за датчиком",Dock=DockStyle.Fill,TextAlign=ContentAlignment.MiddleLeft});
-        sensorBox.Dock=DockStyle.Fill;sensorBox.DropDownStyle=ComboBoxStyle.DropDownList;sensorBox.Margin=new Padding(0,12,0,10);sensorRow.Controls.Add(sensorBox);root.Controls.Add(sensorRow);
+        sensorBox.BackColor=PanelColor;sensorBox.ForeColor=Ink;sensorBox.FlatStyle=FlatStyle.Flat;sensorBox.Dock=DockStyle.Fill;sensorBox.DropDownStyle=ComboBoxStyle.DropDownList;sensorBox.Margin=new Padding(0,12,0,10);sensorRow.Controls.Add(sensorBox);root.Controls.Add(sensorRow);
         var modes=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=4,Margin=Padding.Empty};
         modes.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,145));modes.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,145));modes.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,175));modes.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
         maxButton.Text="МАКСИМУМ";curveButton.Text="За кривою";
@@ -170,30 +171,32 @@ class FanDeskV2 : Form {
         if(trayOverlayItem!=null) trayOverlayItem.Text=overlayOn?"Міні-вікно поверх усіх: ВКЛ":"Міні-вікно поверх усіх: ВИКЛ";
     }
     Control BuildCurveEditor() {
-        var panel=new TableLayoutPanel{Dock=DockStyle.Fill,BackColor=PanelColor,ColumnCount=1,RowCount=2,Padding=new Padding(12,6,12,6),Margin=new Padding(0,0,0,8)};
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute,38));
-        panel.RowStyles.Add(new RowStyle(SizeType.Percent,100));
-        var row1=new FlowLayoutPanel{Dock=DockStyle.Fill,WrapContents=false,Margin=Padding.Empty};
+        var panel=new TableLayoutPanel{Dock=DockStyle.Fill,BackColor=PanelColor,ColumnCount=1,RowCount=3,Padding=new Padding(14,8,14,8),Margin=new Padding(0,0,0,8)};
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute,24));panel.RowStyles.Add(new RowStyle(SizeType.Absolute,53));panel.RowStyles.Add(new RowStyle(SizeType.Percent,100));
+        editorState.Text="КРИВА · усі зміни збережені";editorState.ForeColor=Muted;editorState.Dock=DockStyle.Fill;panel.Controls.Add(editorState);
+        var points=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=4,Margin=Padding.Empty};
+        string[] names={"ПОЧАТОК","ОСНОВНЕ ОХОЛОДЖЕННЯ","ПІДСИЛЕННЯ","ВЕРХНЯ ТОЧКА"};
         for(int i=0;i<4;i++) {
-            row1.Controls.Add(new Label{Text="Т"+(i+1)+":",AutoSize=true,ForeColor=Muted,Margin=new Padding(i==0?0:10,6,2,0)});
-            var tNum=new NumericUpDown{Minimum=30,Maximum=110,DecimalPlaces=0,Width=52,BackColor=Bg,ForeColor=Ink,Margin=new Padding(0,2,2,0)};
-            tempInputs[i]=tNum;row1.Controls.Add(tNum);
-            row1.Controls.Add(new Label{Text="°C →",AutoSize=true,ForeColor=Muted,Margin=new Padding(0,6,2,0)});
-            var rNum=new NumericUpDown{Minimum=1200,Maximum=3600,Increment=50,DecimalPlaces=0,Width=68,BackColor=Bg,ForeColor=Ink,Margin=new Padding(0,2,2,0)};
-            rpmInputs[i]=rNum;row1.Controls.Add(rNum);
+            points.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,25));
+            var group=new TableLayoutPanel{Dock=DockStyle.Fill,RowCount=2,Margin=new Padding(0,0,8,0)};
+            group.RowStyles.Add(new RowStyle(SizeType.Absolute,20));group.RowStyles.Add(new RowStyle(SizeType.Percent,100));
+            group.Controls.Add(new Label{Text=names[i],ForeColor=Muted,Font=new Font("Segoe UI",8),Dock=DockStyle.Fill});
+            var row=new FlowLayoutPanel{Dock=DockStyle.Fill,WrapContents=false,Margin=Padding.Empty};
+            var t=new NumericUpDown{Minimum=30,Maximum=110,Width=52,BackColor=Bg,ForeColor=Ink};
+            var r=new NumericUpDown{Minimum=1200,Maximum=3600,Increment=50,Width=72,BackColor=Bg,ForeColor=Ink};
+            tempInputs[i]=t;rpmInputs[i]=r;
+            row.Controls.Add(t);row.Controls.Add(new Label{Text="°C →",AutoSize=true,Margin=new Padding(0,5,0,0)});row.Controls.Add(r);row.Controls.Add(new Label{Text="RPM",AutoSize=true,Margin=new Padding(0,5,0,0)});
+            t.ValueChanged+=delegate{MarkCurveDirty();};r.ValueChanged+=delegate{MarkCurveDirty();};
+            group.Controls.Add(row);points.Controls.Add(group);
         }
-        panel.Controls.Add(row1);
-        var row2=new FlowLayoutPanel{Dock=DockStyle.Fill,WrapContents=false,Margin=Padding.Empty};
-        extendedCheck.Text="Дозволити оберти вище F0Mx (до 3600 RPM)";
-        extendedCheck.AutoSize=true;extendedCheck.ForeColor=Ink;extendedCheck.Margin=new Padding(0,6,16,0);
-        StyleSubButton(applyCurveButton,"Зберегти криву",140,Color.FromArgb(34,81,112));
-        StyleSubButton(resetCurveButton,"Скинути (55/80/85/90)",175,Color.FromArgb(43,55,73));
-        applyCurveButton.Click+=delegate{ApplyEditorCurve(false);};
-        resetCurveButton.Click+=delegate{ApplyEditorCurve(true);};
-        row2.Controls.Add(extendedCheck);row2.Controls.Add(applyCurveButton);row2.Controls.Add(resetCurveButton);
-        panel.Controls.Add(row2);
-        return panel;
+        panel.Controls.Add(points);
+        var actions=new FlowLayoutPanel{Dock=DockStyle.Fill,WrapContents=false,Margin=new Padding(0,6,0,0)};
+        extendedCheck.Text="Розширені оберти до 3600 RPM";extendedCheck.AutoSize=true;extendedCheck.Margin=new Padding(0,7,18,0);extendedCheck.CheckedChanged+=delegate{MarkCurveDirty();};
+        StyleSubButton(applyCurveButton,"Зберегти криву",140,Color.FromArgb(34,81,112));StyleSubButton(resetCurveButton,"Типові значення",150,Color.FromArgb(43,55,73));
+        applyCurveButton.Click+=delegate{ApplyEditorCurve(false);};resetCurveButton.Click+=delegate{ApplyEditorCurve(true);};
+        actions.Controls.Add(extendedCheck);actions.Controls.Add(applyCurveButton);actions.Controls.Add(resetCurveButton);panel.Controls.Add(actions);return panel;
     }
+    void MarkCurveDirty(){if(populating)return;editorState.Text="КРИВА · є незбережені зміни";editorState.ForeColor=Color.FromArgb(246,198,90);applyCurveButton.Enabled=true;}
     void StyleSubButton(Button b,string text,int width,Color bg) {
         b.Text=text;b.Width=width;b.Height=30;b.FlatStyle=FlatStyle.Flat;b.BackColor=bg;b.ForeColor=Ink;b.Margin=new Padding(0,2,10,0);
     }
@@ -204,6 +207,7 @@ class FanDeskV2 : Form {
             rpmInputs[i].Value=(decimal)Math.Max(1200,Math.Min(3600,c.Rpms[i]));
         }
         extendedCheck.Checked=c.Extended;
+        editorState.Text="КРИВА · усі зміни збережені";editorState.ForeColor=Muted;applyCurveButton.Enabled=false;
         curve.Curve=c.Clone();curve.Invalidate();
         populating=false;
     }
@@ -306,7 +310,7 @@ class FanDeskV2 : Form {
         lastTemp=value.Temperature;lastRpm=f.Actual;
         if(overlay!=null)overlay.UpdateValues(lastTemp,lastRpm);
         tempCard.Text=DeskPolicy.TemperatureValid(value.Temperature)?value.Temperature.ToString("0.0")+" °C":"—";rpmCard.Text=f.Actual.ToString("0")+" RPM";targetCard.Text=f.Target.ToString("0")+" RPM";
-        curveLabel.Text=activeCurve.Summary(f.Max);
+        curveLabel.Text=activeCurve.Extended?"Плавна крива · до "+activeCurve.Rpms[3].ToString("0")+" RPM":"Плавна крива · ліміт SMC "+f.Max.ToString("0")+" RPM";
         if(value.Maximum)curveLabel.Text="ПОСТІЙНИЙ MAX · "+activeCurve.EffectiveCeiling(f.Max).ToString("0")+" RPM (температура не знижує ціль)";
         maxButton.BackColor=value.Maximum?Color.FromArgb(145,86,24):PanelColor;curveButton.BackColor=value.Maximum?PanelColor:Color.FromArgb(34,81,112);
         UpdateOverlayButtonStyle();
@@ -350,7 +354,7 @@ class FanDeskV2 : Form {
     }
     [STAThread]static int Main(string[] args){
         DeskFiles.Load();Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
-        if(args.Contains("--self-test")){try{DeskPolicy.SelfTest();File.WriteAllText(Path.Combine(DeskFiles.Root,"self-test.txt"),"PASS v0.6: 4-point curve, extended target override, overlay, hot GPU vs cool CPU, hot CPU, invalid readings, missing-sensor fallback, invalid limits");return 0;}catch(Exception ex){DeskFiles.Error(ex);return 2;}}
+        if(args.Contains("--self-test")){try{DeskPolicy.SelfTest();File.WriteAllText(Path.Combine(DeskFiles.Root,"self-test.txt"),"PASS v0.7: 4-point curve, extended target override, overlay, hot GPU vs cool CPU, hot CPU, invalid readings, missing-sensor fallback, invalid limits");return 0;}catch(Exception ex){DeskFiles.Error(ex);return 2;}}
         if(args.Contains("--render-preview")){using(var form=new FanDeskV2(false,true)){form.SeedPreview();form.Show();Application.DoEvents();using(var bitmap=new Bitmap(form.Width,form.Height)){form.DrawToBitmap(bitmap,new Rectangle(0,0,form.Width,form.Height));bitmap.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"preview.png"),ImageFormat.Png);}form.Close();}return 0;}
         bool first;using(var single=new Mutex(true,"Local\\iMacFanDesk_controller",out first))using(var show=new EventWaitHandle(false,EventResetMode.AutoReset,"Local\\iMacFanDesk_show")){
             if(!first){show.Set();return 0;}Process.GetCurrentProcess().PriorityClass=ProcessPriorityClass.Normal;

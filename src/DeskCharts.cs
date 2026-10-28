@@ -1,4 +1,4 @@
-// GPL-2.0-only
+﻿// GPL-2.0-only
 using System;
 using System.Collections.Generic;
 using System.Drawing;
@@ -37,8 +37,8 @@ class HistoryChart : Control {
             }
         }
         g.Clip=previousClip;previousClip.Dispose();
-        string[] names={"Фактичні RPM","Ціль SMC","Обраний датчик"};
-        for(int i=0;i<3;i++)using(var brush=new SolidBrush(colors[i])){int x=20+i*190;g.FillEllipse(brush,x,Height-19,7,7);g.DrawString(names[i],Font,brush,x+13,Height-25);}
+        string[] names={"Фактичні RPM","Задано RPM","Обраний датчик"};
+        for(int i=0;i<3;i++)using(var brush=new SolidBrush(colors[i])){int x=16+i*Math.Max(1,(Width-24)/3);g.FillEllipse(brush,x,Height-19,7,7);g.DrawString(names[i],Font,brush,x+13,Height-25);}
     }
 }
 class CurveChart : Control {
@@ -56,8 +56,8 @@ class CurveChart : Control {
             g.DrawString("КРИВА ТЕМПЕРАТУР",Font,b,16,14);
             g.DrawString(maxRpm.ToString("0")+" RPM",Font,b,r.Left,r.Top-23);
             g.DrawString(minRpm.ToString("0")+" RPM",Font,b,r.Left,r.Bottom+9);
-            g.DrawString(c.Temps[0].ToString("0")+"°C",Font,b,r.Left,r.Bottom+31);
-            g.DrawString(c.Temps[3].ToString("0")+"°C",Font,b,r.Right-36,r.Bottom+31);
+            g.DrawString(minTemp.ToString("0")+"°C",Font,b,r.Left,r.Bottom+31);
+            g.DrawString(maxTemp.ToString("0")+"°C",Font,b,r.Right-36,r.Bottom+31);
             if(c.Extended&&Max>minRpm&&Max<maxRpm) {
                 float ySmc=r.Bottom-(float)((Max-minRpm)/(maxRpm-minRpm)*r.Height);
                 grid.DashStyle=DashStyle.Dot;
